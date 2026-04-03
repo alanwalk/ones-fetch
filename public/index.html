@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ONES 任务解析器</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fa; color: #1a1a2e; min-height: 100vh; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 24px 16px; }
+  h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 4px; color: #1a1a2e; }
+  .subtitle { font-size: 0.875rem; color: #6b7280; margin-bottom: 20px; }
+  .input-card { background: #fff; border-radius: 10px; padding: 20px; box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 16px; }
+  textarea { width: 100%; height: 140px; border: 1px solid #d1d5db; border-radius: 6px; padding: 10px 12px; font-size: 0.875rem; font-family: inherit; resize: vertical; outline: none; transition: border-color .2s; }
+  textarea:focus { border-color: #6366f1; }
+  .row { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .hint { font-size: 0.8125rem; color: #6b7280; }
+  button { cursor: pointer; border: none; border-radius: 6px; padding: 8px 18px; font-size: 0.875rem; font-weight: 500; transition: opacity .15s, background .15s; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  .btn-primary { background: #6366f1; color: #fff; }
+  .btn-primary:hover:not(:disabled) { background: #4f46e5; }
+  .btn-secondary { background: #e5e7eb; color: #374151; }
+  .btn-secondary:hover:not(:disabled) { background: #d1d5db; }
+  .btn-success { background: #10b981; color: #fff; }
+  .btn-success:hover:not(:disabled) { background: #059669; }
+  .btn-link { background: #f59e0b; color: #fff; }
+  .btn-link:hover:not(:disabled) { background: #d97706; }
+  .status { font-size: 0.8125rem; color: #6b7280; }
+  .status.error { color: #ef4444; }
+  .preview-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+  .chip { background: #ede9fe; color: #5b21b6; font-size: 0.75rem; padding: 3px 10px; border-radius: 999px; font-family: monospace; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .results-card { background: #fff; border-radius: 10px; box-shadow: 0 1px 4px rgba(0,0,0,.08); overflow: hidden; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+  th { background: #f9fafb; text-align: left; padding: 10px 14px; font-weight: 600; color: #6b7280; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+  td { padding: 9px 14px; border-bottom: 1px solid #f3f4f6; vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: #fafafa; }
+  .indent { display: inline-block; }
+  .toggle-btn { cursor: pointer; background: none; border: none; padding: 0 4px 0 0; font-size: 0.75rem; color: #9ca3af; line-height: 1; vertical-align: middle; }
+  .toggle-btn:hover { color: #6366f1; }
+  .num-cell { font-weight: 600; color: #4f46e5; white-space: nowrap; }
+  .num-link { color: inherit; text-decoration: none; }
+  .num-link:hover { text-decoration: underline; }
+  .tag { display: inline-block; font-size: 0.7rem; padding: 2px 7px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; }
+  .empty { text-align: center; color: #9ca3af; padding: 40px; font-size: 0.875rem; }
+  .loading { text-align: center; color: #6b7280; padding: 40px; }
+  .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #e5e7eb; border-top-color: #6366f1; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .copied { background: #10b981 !important; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>ONES 任务解析器</h1>
+  <p class="subtitle">粘贴包含 ONES 任务链接或 #任务编号 的文本，自动提取并递归获取所有子任务</p>
+
+  <div class="input-card">
+    <textarea id="input" placeholder="粘贴任务文本，例如：&#10;#80487 【9.12】去掉封印英雄相关的内容&#10;https://ones.kingamer.cn/project/#/team/EPySA1xa/task/Dw3sXNfzJOJ73Gfg"></textarea>
+    <div class="row">
+      <button class="btn-primary" id="parseBtn" onclick="parse()">解 析</button>
+      <button class="btn-secondary" onclick="clearAll()">清 空</button>
+      <button class="btn-link" id="authBtn" onclick="connectOnes()" style="display:none">连接 ONES</button>
+      <span class="status" id="status"></span>
+    </div>
+    <div class="hint" id="authHint"></div>
+    <div class="preview-chips" id="chips"></div>
+  </div>
+
+  <div id="resultsSection" style="display:none">
+    <div class="toolbar">
+      <button class="btn-success" id="copyBtn" onclick="copyAllNumbers()">复制所有编号</button>
+      <button class="btn-secondary" onclick="expandAll()">展开全部</button>
+      <button class="btn-secondary" onclick="collapseAll()">折叠全部</button>
+      <span class="status" id="countLabel"></span>
+    </div>
+    <div class="results-card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>编号</th>
+              <th>标题</th>
+              <th>状态</th>
+              <th>负责人</th>
+              <th>截止日期</th>
+            </tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+let allTasks = [];
+let collapsed = new Set();
+let authPollingTimer = null;
+let authContext = { baseUrl: '', teamId: '' };
+
+function extractContext(text) {
+  const match = text.match(/(https?:\/\/[^/\s]+)\/project\/#\/team\/([^/\s]+)\/task\/([A-Za-z0-9]{10,})/);
+  if (!match) return { baseUrl: '', teamId: '' };
+  return { baseUrl: match[1], teamId: match[2] };
+}
+
+function extractTaskIds(text) {
+  const uuids = [];
+  const numbers = [];
+
+  for (const match of text.matchAll(/\/task\/([A-Za-z0-9]{10,})/g)) {
+    uuids.push(match[1]);
+  }
+
+  const textWithoutUrls = text.replace(/https?:\/\/[^\s]+/g, '');
+  for (const match of textWithoutUrls.matchAll(/#(\d+)/g)) {
+    numbers.push(match[1]);
+  }
+
+  const seen = new Set();
+  return [...uuids, ...numbers].filter(id => {
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function setStatus(msg, isError = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg;
+  el.className = 'status' + (isError ? ' error' : '');
+}
+
+function setAuthHint(msg) {
+  document.getElementById('authHint').textContent = msg || '';
+}
+
+function updateAuthContext(next) {
+  authContext = {
+    baseUrl: next?.baseUrl || authContext.baseUrl || '',
+    teamId: next?.teamId || authContext.teamId || '',
+  };
+}
+
+function showAuthButton(show, label = '连接 ONES') {
+  const btn = document.getElementById('authBtn');
+  btn.style.display = show ? '' : 'none';
+  btn.textContent = label;
+  btn.disabled = false;
+}
+
+function renderChips(taskIds) {
+  const el = document.getElementById('chips');
+  if (taskIds.length === 0) { el.innerHTML = ''; return; }
+  el.innerHTML = taskIds.map(id => `<span class="chip">${id}</span>`).join('');
+}
+
+async function parse() {
+  const text = document.getElementById('input').value.trim();
+  if (!text) { setStatus('请先粘贴文本', true); return; }
+  const taskIds = extractTaskIds(text);
+  const context = extractContext(text);
+  updateAuthContext(context);
+  if (taskIds.length === 0) { setStatus('未找到任务 ID（支持 /task/UUID 链接或 #数字编号）', true); return; }
+  renderChips(taskIds);
+  setStatus(`已提取 ${taskIds.length} 个任务 ID，正在抓取...`);
+  setAuthHint(context.baseUrl ? `已识别站点：${context.baseUrl}${context.teamId ? `，团队：${context.teamId}` : ''}` : '');
+  document.getElementById('parseBtn').disabled = true;
+  document.getElementById('tbody').innerHTML = '<tr><td colspan="5" class="loading"><span class="spinner"></span>加载中...</td></tr>';
+  document.getElementById('resultsSection').style.display = '';
+
+  try {
+    const resp = await fetch('/api/crawl', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskIds, baseUrl: authContext.baseUrl || context.baseUrl || undefined, teamId: authContext.teamId || context.teamId || undefined }),
+    });
+    const data = await resp.json();
+    if (!resp.ok) {
+      if (data.error === 'auth_required' || data.error === 'token_expired') {
+        updateAuthContext(data);
+        showAuthButton(true, data.error === 'token_expired' ? '重新连接 ONES' : '连接 ONES');
+        setAuthHint(`将打开一个浏览器窗口用于登录 ONES，完成后会自动重试。${authContext.baseUrl ? ` 当前站点：${authContext.baseUrl}` : ''}`);
+      }
+      const msg = data.error === 'token_expired'
+        ? '登录状态已过期，请点击“连接 ONES”重新登录'
+        : data.error === 'auth_required'
+          ? '当前还没有可用的 ONES 凭据，请先连接 ONES'
+          : (data.detail ?? data.error ?? '抓取失败');
+      setStatus(msg, true);
+      document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`;
+      return;
+    }
+    showAuthButton(false);
+    updateAuthContext(data);
+    allTasks = data.tasks ?? [];
+    collapsed = new Set();
+    renderTable();
+    setStatus(`共获取 ${allTasks.length} 条任务`);
+    document.getElementById('countLabel').textContent = `共 ${allTasks.length} 条`;
+  } catch (e) {
+    setStatus('网络错误：' + e.message, true);
+  } finally {
+    document.getElementById('parseBtn').disabled = false;
+  }
+}
+
+async function connectOnes() {
+  const text = document.getElementById('input').value;
+  const context = extractContext(text);
+  updateAuthContext(context);
+  const btn = document.getElementById('authBtn');
+
+  if (!authContext.baseUrl) {
+    setStatus('当前没有可用的 ONES 站点地址，请先粘贴任务链接或配置 ONES_BASE_URL', true);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = '正在打开登录窗口...';
+  setStatus('正在打开 ONES 登录窗口，请在弹出的浏览器里完成登录');
+
+  const resp = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseUrl: authContext.baseUrl, teamId: authContext.teamId || undefined }),
+  });
+  const data = await resp.json();
+  if (!resp.ok) {
+    btn.disabled = false;
+    btn.textContent = '连接 ONES';
+    setStatus(data.detail ?? data.error ?? '无法启动登录流程', true);
+    return;
+  }
+
+  updateAuthContext(data);
+  setAuthHint(`已打开 ${authContext.baseUrl} 的登录窗口，登录完成后将自动重试解析。`);
+  startAuthPolling();
+}
+
+function startAuthPolling() {
+  if (authPollingTimer) window.clearInterval(authPollingTimer);
+  authPollingTimer = window.setInterval(async () => {
+    const resp = await fetch('/api/auth/status');
+    const data = await resp.json();
+    if (data.status === 'pending') {
+      showAuthButton(true, '等待登录完成...');
+      document.getElementById('authBtn').disabled = true;
+      return;
+    }
+
+    window.clearInterval(authPollingTimer);
+    authPollingTimer = null;
+
+    if (data.status === 'authenticated') {
+      updateAuthContext(data);
+      showAuthButton(false);
+      setStatus('ONES 已连接，正在重新解析...');
+      setAuthHint(`当前站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}`);
+      await parse();
+      return;
+    }
+
+    showAuthButton(true, '连接 ONES');
+    setStatus(data.error === 'LOGIN_TIMEOUT' ? '登录超时，请重试' : '登录未完成，请重试', true);
+  }, 1500);
+}
+
+function buildTree(tasks) {
+  const byUuid = new Map(tasks.map(t => [t.uuid, { ...t, children: [] }]));
+  const roots = [];
+  for (const node of byUuid.values()) {
+    if (node.parent_uuid && byUuid.has(node.parent_uuid)) {
+      byUuid.get(node.parent_uuid).children.push(node);
+    } else {
+      roots.push(node);
+    }
+  }
+  return roots;
+}
+
+function flattenTree(nodes, depth = 0) {
+  const result = [];
+  for (const node of nodes) {
+    result.push({ ...node, _depth: depth });
+    if (!collapsed.has(node.uuid) && node.children.length > 0) {
+      result.push(...flattenTree(node.children, depth + 1));
+    }
+  }
+  return result;
+}
+
+function renderTable() {
+  const roots = buildTree(allTasks);
+  const flat = flattenTree(roots);
+
+  const rows = flat.map(t => {
+    const hasChildren = t.children.length > 0;
+    const isCollapsed = collapsed.has(t.uuid);
+    const toggleIcon = hasChildren ? `<button class="toggle-btn" onclick="toggleRow('${t.uuid}')">${isCollapsed ? '▶' : '▼'}</button>` : '<span style="display:inline-block;width:18px"></span>';
+    const indent = `<span class="indent" style="width:${t._depth * 20}px"></span>`;
+    const taskUrl = authContext.baseUrl && authContext.teamId
+      ? `${authContext.baseUrl}/project/#/team/${authContext.teamId}/task/${t.uuid}`
+      : '';
+    const numberCell = taskUrl
+      ? `<a class="num-link" href="${escAttr(taskUrl)}" target="_blank" rel="noreferrer">#${esc(t.number ?? '')}</a>`
+      : `#${esc(t.number ?? '')}`;
+    return `<tr data-uuid="${t.uuid}">
+      <td class="num-cell">${numberCell}</td>
+      <td>${indent}${toggleIcon}${esc(t.summary ?? '')}</td>
+      <td>${t.status_name ? `<span class="tag">${esc(t.status_name)}</span>` : ''}</td>
+      <td>${esc(t.assign_name ?? '')}</td>
+      <td>${esc(t.deadline ?? '')}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('tbody').innerHTML = rows || '<tr><td colspan="5" class="empty">无结果</td></tr>';
+}
+
+function esc(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escAttr(str) {
+  return String(str).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+}
+
+function toggleRow(uuid) {
+  if (collapsed.has(uuid)) collapsed.delete(uuid);
+  else collapsed.add(uuid);
+  renderTable();
+}
+
+function expandAll() {
+  collapsed.clear();
+  renderTable();
+}
+
+function collapseAll() {
+  for (const t of allTasks) {
+    const node = allTasks.find(x => x.parent_uuid === t.uuid);
+    if (node) collapsed.add(t.uuid);
+  }
+  renderTable();
+}
+
+function copyAllNumbers() {
+  const numbers = allTasks.map(t => `#${t.number}`).join('|');
+  navigator.clipboard.writeText(numbers).then(() => {
+    const btn = document.getElementById('copyBtn');
+      btn.textContent = '已复制 ✓';
+      btn.classList.add('copied');
+      setTimeout(() => {
+      btn.textContent = '复制所有编号';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function clearAll() {
+  document.getElementById('input').value = '';
+  document.getElementById('chips').innerHTML = '';
+  document.getElementById('status').textContent = '';
+  setAuthHint('');
+  showAuthButton(false);
+  authContext = { baseUrl: '', teamId: '' };
+  document.getElementById('resultsSection').style.display = 'none';
+  allTasks = [];
+}
+
+// Auto-extract chips on input
+document.getElementById('input').addEventListener('input', () => {
+  const text = document.getElementById('input').value;
+  const taskIds = extractTaskIds(text);
+  const context = extractContext(text);
+  updateAuthContext(context);
+  renderChips(taskIds);
+  setStatus(taskIds.length ? `检测到 ${taskIds.length} 个任务 ID` : '');
+  setAuthHint(authContext.baseUrl ? `已识别站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}` : '');
+});
+</script>
+</body>
+</html>
