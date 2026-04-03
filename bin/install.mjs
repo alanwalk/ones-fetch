@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { writeFile, mkdir } from 'node:fs/promises';
+import { writeFile, mkdir, cp, access } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -11,11 +11,38 @@ const execAsync = promisify(exec);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = join(__dirname, '..');
 
+// 固定安装目录（用户主目录下）
+const installDir = join(homedir(), '.ones-fetch');
+
+async function ensureInstallDir() {
+  try {
+    await access(installDir);
+    console.log(`使用现有安装目录: ${installDir}`);
+  } catch {
+    // 目录不存在，复制项目文件
+    console.log(`正在复制项目文件到 ${installDir}...`);
+    await mkdir(installDir, { recursive: true });
+
+    // 复制必要的文件和目录
+    try {
+      await cp(join(projectRoot, 'src'), join(installDir, 'src'), { recursive: true });
+      await cp(join(projectRoot, 'public'), join(installDir, 'public'), { recursive: true });
+      await cp(join(projectRoot, 'bin'), join(installDir, 'bin'), { recursive: true });
+      await cp(join(projectRoot, 'package.json'), join(installDir, 'package.json'));
+      await cp(join(projectRoot, 'package-lock.json'), join(installDir, 'package-lock.json')).catch(() => {});
+      console.log('✓ 项目文件复制完成');
+    } catch (err) {
+      console.error('✗ 文件复制失败:', err.message);
+      throw err;
+    }
+  }
+}
+
 async function createWindowsShortcut() {
   const desktop = join(homedir(), 'Desktop');
   const shortcutPath = join(desktop, 'ONES 采集工具.lnk');
-  const iconPath = join(projectRoot, 'public', 'icon.ico');
-  const vbsLauncher = join(projectRoot, 'public', 'launcher.vbs');
+  const iconPath = join(installDir, 'public', 'icon.ico');
+  const vbsLauncher = join(installDir, 'public', 'launcher.vbs');
 
   // 创建 PowerShell 脚本来生成快捷方式
   const psScript = `
@@ -23,13 +50,13 @@ $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("${shortcutPath.replace(/\\/g, '\\\\')}")
 $Shortcut.TargetPath = "wscript.exe"
 $Shortcut.Arguments = '"${vbsLauncher.replace(/\\/g, '\\\\')}"'
-$Shortcut.WorkingDirectory = "${projectRoot.replace(/\\/g, '\\\\')}"
+$Shortcut.WorkingDirectory = "${installDir.replace(/\\/g, '\\\\')}"
 $Shortcut.IconLocation = "${iconPath.replace(/\\/g, '\\\\')},0"
 $Shortcut.Description = "ONES 任务采集工具"
 $Shortcut.Save()
 `;
 
-  const tempPs1 = join(projectRoot, 'temp-create-shortcut.ps1');
+  const tempPs1 = join(installDir, 'temp-create-shortcut.ps1');
   await writeFile(tempPs1, psScript, 'utf8');
 
   try {
@@ -82,6 +109,9 @@ async function main() {
   // 检测是否是通过 npx 或 postinstall 运行
   const isPostInstall = process.env.npm_lifecycle_event === 'postinstall';
 
+  // 确保安装目录存在
+  await ensureInstallDir();
+
   if (isPostInstall) {
     // postinstall 时只创建快捷方式，不安装依赖
     console.log('ONES Fetch 安装后配置\n');
@@ -103,9 +133,7 @@ async function main() {
     console.log('\n使用方法：');
     console.log('  1. 双击桌面上的 "ONES 采集工具" 图标');
     console.log('  2. 浏览器会自动打开工具页面');
-    console.log('\n或者在命令行运行：');
-    console.log(`  cd ${projectRoot}`);
-    console.log('  npm start');
+    console.log(`\n项目位置：${installDir}`);
     return;
   }
 
@@ -115,7 +143,7 @@ async function main() {
   // 安装依赖
   console.log('正在安装依赖...');
   try {
-    await execAsync('npm install', { cwd: projectRoot });
+    await execAsync('npm install', { cwd: installDir });
     console.log('✓ 依赖安装完成\n');
   } catch (err) {
     console.error('✗ 依赖安装失败:', err.message);
@@ -142,9 +170,7 @@ async function main() {
   console.log('\n使用方法：');
   console.log('  1. 双击桌面上的 "ONES 采集工具" 图标');
   console.log('  2. 浏览器会自动打开工具页面');
-  console.log('\n或者在命令行运行：');
-  console.log(`  cd ${projectRoot}`);
-  console.log('  npm start');
+  console.log(`\n项目位置：${installDir}`);
 }
 
 main().catch(console.error);
