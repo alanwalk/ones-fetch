@@ -49,8 +49,7 @@ npm install
 ### 方式 1：双击启动（推荐给非技术用户）
 
 **Windows 用户：**
-- 双击 `启动 ONES 采集工具.vbs`
-- 首次运行会自动安装依赖
+- 双击桌面 `ONES 采集工具.lnk`
 - 浏览器会自动打开工具页面
 
 ### 方式 2：命令行启动
@@ -151,6 +150,8 @@ npm run dev
 
 ```
 ones-fetch/
+├── bin/
+│   └── install.mjs     # 安装依赖及快捷方式
 ├── src/
 │   ├── server.mjs      # HTTP 服务器和任务爬取逻辑
 │   └── auth.mjs        # 浏览器登录和凭证管理
