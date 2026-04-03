@@ -6,12 +6,9 @@
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "scripts": {
     "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs",
-    "dev:watch": "node --watch src/server.mjs",
-    "cli": "node src/ones-subtasks-cli.mjs",
-    "serve": "node src/server.mjs"
+    "dev": "node --watch src/server.mjs"
   },
   "dependencies": {
-    "playwright": "^1.58.2"
+    "playwright-core": "^1.58.2"
   }
 }

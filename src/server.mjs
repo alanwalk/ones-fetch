@@ -3,10 +3,16 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
+import { exec } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 const PORT = process.env.PORT ?? 3000;
+
+function openBrowser(url) {
+  const start = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
+  exec(`${start} ${url}`);
+}
 
 const authFlow = {
   status: 'idle',
@@ -39,12 +45,10 @@ function sendJson(res, statusCode, payload) {
 
 async function resolveRuntimeContext(overrides = {}) {
   const { loadAuth } = await import('./auth.mjs');
-  const { readConfig } = await import('./config.mjs');
-  const cfg = await readConfig();
 
   const overrideBaseUrl = normalizeBaseUrl(overrides.baseUrl);
-  const configBaseUrl = normalizeBaseUrl(process.env.ONES_BASE_URL) || normalizeBaseUrl(cfg['base-url']);
-  const requestedBaseUrl = overrideBaseUrl || configBaseUrl;
+  const envBaseUrl = normalizeBaseUrl(process.env.ONES_BASE_URL);
+  const requestedBaseUrl = overrideBaseUrl || envBaseUrl;
 
   let auth = null;
   try {
@@ -59,7 +63,7 @@ async function resolveRuntimeContext(overrides = {}) {
   }
 
   const baseUrl = requestedBaseUrl || authBaseUrl || '';
-  const teamId = overrides.teamId ?? process.env.ONES_TEAM_ID ?? cfg['team-id'] ?? '';
+  const teamId = overrides.teamId ?? auth?.teamId ?? process.env.ONES_TEAM_ID ?? '';
 
   return {
     authToken: auth?.authToken ?? null,
@@ -68,6 +72,180 @@ async function resolveRuntimeContext(overrides = {}) {
     teamId,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Task crawling logic (inlined from ones-subtasks-cli.mjs)
+// ---------------------------------------------------------------------------
+
+async function resolveTaskNumber(baseUrl, teamId, taskNumber, authToken, userId) {
+  const url = `${baseUrl}/project/api/project/team/${teamId}/items/graphql?t=resolve-by-number`;
+  const body = JSON.stringify({
+    query: `{ tasks(filter: { number_equal: ${taskNumber} }) { uuid number } }`,
+    variables: {},
+  });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "accept": "application/json, text/plain, */*",
+      "content-type": "application/json;charset=UTF-8",
+      "ones-auth-token": authToken,
+      "ones-user-id": userId,
+      "referer": `${baseUrl}/project/`,
+    },
+    body,
+  });
+  if (res.status === 401) throw new Error("TOKEN_EXPIRED");
+  if (!res.ok) throw new Error(`GraphQL resolve → ${res.status}`);
+  const json = await res.json();
+  if (json?.errors?.length > 0) {
+    const msg = json.errors[0].message ?? String(json.errors[0]);
+    throw new Error(`GraphQL query failed for task number "${taskNumber}": ${msg}`);
+  }
+  const tasks = json?.data?.tasks ?? [];
+  if (tasks.length === 0) throw new Error(`No task found with number ${taskNumber}`);
+  return tasks[0].uuid;
+}
+
+async function fetchTaskInfo(baseUrl, teamId, taskUuid, authToken, userId) {
+  const url = `${baseUrl}/project/api/project/team/${teamId}/task/${taskUuid}/info`;
+  const res = await fetch(url, {
+    headers: {
+      "accept": "application/json, text/plain, */*",
+      "ones-auth-token": authToken,
+      "ones-user-id": userId,
+      "referer": `${baseUrl}/project/`,
+    },
+  });
+  if (res.status === 401) throw new Error("TOKEN_EXPIRED");
+  if (!res.ok) throw new Error(`GET ${url} → ${res.status}`);
+  return res.json();
+}
+
+function chunk(list, size) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) chunks.push(list.slice(i, i + size));
+  return chunks;
+}
+
+function getImportantFieldValue(task, fieldName) {
+  const match = (task.importantField ?? []).find((field) => field.name === fieldName);
+  return match?.value ?? null;
+}
+
+async function enrichTasks(baseUrl, teamId, tasks, authToken, userId) {
+  const details = new Map();
+
+  for (const uuidChunk of chunk([...new Set(tasks.map((task) => task.uuid))], 200)) {
+    const res = await fetch(`${baseUrl}/project/api/project/team/${teamId}/items/graphql?t=task-enrich`, {
+      method: "POST",
+      headers: {
+        accept: "application/json, text/plain, */*",
+        "content-type": "application/json;charset=UTF-8",
+        "ones-auth-token": authToken,
+        "ones-user-id": userId,
+        referer: `${baseUrl}/project/`,
+      },
+      body: JSON.stringify({
+        query: `query TaskEnrich($uuids: [String!]) {
+  tasks(filter: { uuid_in: $uuids }) {
+    uuid
+    number
+    name
+    deadline(unit: ONESDATE)
+    status {
+      uuid
+      name
+      category
+    }
+    parent {
+      uuid
+    }
+    project {
+      uuid
+    }
+    importantField {
+      name
+      value
+      fieldUUID
+    }
+  }
+}`,
+        variables: {
+          uuids: uuidChunk,
+        },
+      }),
+    });
+
+    if (res.status === 401) throw new Error("TOKEN_EXPIRED");
+    if (!res.ok) throw new Error(`GraphQL enrich → ${res.status}`);
+
+    const json = await res.json();
+    const enrichedTasks = json?.data?.tasks ?? [];
+    for (const enriched of enrichedTasks) {
+      details.set(enriched.uuid, {
+        summary: enriched.name,
+        status_uuid: enriched.status?.uuid ?? null,
+        status_name: enriched.status?.name ?? null,
+        assign_name: getImportantFieldValue(enriched, "负责人"),
+        deadline: enriched.deadline ?? null,
+        parent_uuid: enriched.parent?.uuid || null,
+        project_uuid: enriched.project?.uuid ?? null,
+      });
+    }
+  }
+
+  return tasks.map((task) => {
+    const enriched = details.get(task.uuid);
+    if (!enriched) return task;
+    return {
+      ...task,
+      summary: enriched.summary ?? task.summary,
+      status_uuid: enriched.status_uuid ?? task.status_uuid,
+      status_name: enriched.status_name ?? task.status_name,
+      assign_name: enriched.assign_name ?? task.assign_name,
+      deadline: enriched.deadline ?? task.deadline,
+      parent_uuid: enriched.parent_uuid ?? task.parent_uuid,
+      project_uuid: enriched.project_uuid ?? task.project_uuid,
+    };
+  });
+}
+
+function extractTask(data) {
+  const status = typeof data.status === "object" && data.status ? data.status : null;
+  return {
+    uuid: data.uuid,
+    number: data.number,
+    summary: data.summary ?? data.name,
+    status_uuid: data.status_uuid ?? status?.uuid ?? "",
+    status_name: status?.name ?? null,
+    assign: typeof data.assign === "string" ? data.assign : data.assign?.uuid ?? "",
+    assign_name: typeof data.assign === "object" && data.assign ? data.assign.name : null,
+    priority: data.priority,
+    deadline: typeof data.deadline === "number" ? new Date(data.deadline * 1000).toISOString().slice(0, 10) : data.deadline ?? null,
+    parent_uuid: data.parent_uuid || data.parent?.uuid || null,
+    project_uuid: data.project_uuid || data.project?.uuid || null,
+  };
+}
+
+async function crawlTask(baseUrl, teamId, taskUuid, authToken, userId, depth, maxDepth, seen) {
+  if (depth > maxDepth || seen.has(taskUuid)) return [];
+  seen.add(taskUuid);
+
+  const data = await fetchTaskInfo(baseUrl, teamId, taskUuid, authToken, userId);
+  const task = extractTask(data);
+  const results = [task];
+
+  const subtasks = data.subtasks ?? data.subTasks ?? [];
+  for (const sub of subtasks) {
+    const children = await crawlTask(baseUrl, teamId, sub.uuid, authToken, userId, depth + 1, maxDepth, seen);
+    results.push(...children);
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handlers
+// ---------------------------------------------------------------------------
 
 async function handleAuthStatus(_req, res) {
   if (authFlow.status === 'pending') {
@@ -89,7 +267,7 @@ async function handleAuthStatus(_req, res) {
   }
 
   return sendJson(res, 200, {
-    status: authFlow.status === 'pending' ? 'pending' : 'unauthenticated',
+    status: 'unauthenticated',
     error: authFlow.error,
     baseUrl: context.baseUrl,
     teamId: context.teamId,
@@ -144,8 +322,6 @@ async function handleCrawl(req, res) {
   }
 
   try {
-    const { resolveTaskNumber, crawlTask, enrichTasks } = await import('./ones-subtasks-cli.mjs');
-
     const { authToken, userId, baseUrl, teamId } = await resolveRuntimeContext({
       baseUrl: requestBaseUrl,
       teamId: requestTeamId,
@@ -160,8 +336,8 @@ async function handleCrawl(req, res) {
       });
     }
 
-    if (!baseUrl || !teamId) {
-      return sendJson(res, 500, { error: 'missing_config', detail: 'base-url or team-id not configured. Paste a task link or configure them first.' });
+    if (!teamId) {
+      return sendJson(res, 500, { error: 'missing_config', detail: 'team-id not configured. Please login to auto-detect it.' });
     }
 
     const seen = new Set();
@@ -176,7 +352,7 @@ async function handleCrawl(req, res) {
         rootUuid = rawId;
       }
       roots.push(rootUuid);
-      const tasks = await crawlTask(baseUrl, teamId, rootUuid, authToken, userId, 0, 10, seen, false);
+      const tasks = await crawlTask(baseUrl, teamId, rootUuid, authToken, userId, 0, 10, seen);
       for (const t of tasks) allTasks.push({ ...t, root_uuid: rootUuid });
     }
 
@@ -213,5 +389,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => {
-  process.stdout.write(`ONES Fetch Web UI → http://localhost:${PORT}\n`);
+  const url = `http://localhost:${PORT}`;
+  process.stdout.write(`ONES Fetch Web UI → ${url}\n`);
+  openBrowser(url);
 });

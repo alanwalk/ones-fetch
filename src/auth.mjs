@@ -1,11 +1,10 @@
-// auth.mjs — login + credential persistence for ones-fetch CLI
+// auth.mjs — browser login for ones-fetch web mode
 // Credentials stored at ~/.ones-fetch/credentials.json (mode 600 on non-Windows)
 
 import os from "node:os";
 import fsp from "node:fs/promises";
 import path from "node:path";
-import readline from "node:readline";
-import { chromium } from "playwright";
+import { chromium } from "playwright-core";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -61,7 +60,12 @@ async function extractSessionFromPage(page) {
       }
     }
 
-    return authToken && userId ? { authToken, userId } : null;
+    // Extract team-id from URL: /team/{uuid}/...
+    let teamId = null;
+    const teamMatch = window.location.href.match(/\/team\/([a-zA-Z0-9]{16,})/);
+    if (teamMatch) teamId = teamMatch[1];
+
+    return authToken && userId ? { authToken, userId, teamId } : null;
   });
 }
 
@@ -78,9 +82,10 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
       if (resolved) return;
       try {
         if (error) throw error;
-        await writeCredentials({ ...result, baseUrl });
+        const credentialsToSave = { ...result, baseUrl };
+        await writeCredentials(credentialsToSave);
         resolved = true;
-        resolve({ ...result, baseUrl });
+        resolve(credentialsToSave);
       } catch (innerError) {
         resolved = true;
         reject(innerError);
@@ -116,7 +121,14 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
         const authToken = headers["ones-auth-token"] ?? null;
         const userId = headers["ones-user-id"] ?? null;
         if (authToken && userId) {
-          await finish({ authToken, userId }, null);
+          // Try to extract teamId from current page URL
+          let teamId = null;
+          try {
+            const currentUrl = page.url();
+            const teamMatch = currentUrl.match(/\/team\/([a-zA-Z0-9]{16,})/);
+            if (teamMatch) teamId = teamMatch[1];
+          } catch { /* ignore */ }
+          await finish({ authToken, userId, teamId }, null);
           return;
         }
       } catch {
@@ -151,181 +163,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
 }
 
 // ---------------------------------------------------------------------------
-// Password prompt (no echo)
-// ---------------------------------------------------------------------------
-
-function promptVisible(question) {
-  return new Promise((resolve) => {
-    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-function promptHidden(question) {
-  return new Promise((resolve) => {
-    process.stdout.write(question);
-    const stdin = process.stdin;
-    const chars = [];
-
-    if (typeof stdin.setRawMode === "function") {
-      stdin.setRawMode(true);
-      stdin.resume();
-      stdin.setEncoding("utf8");
-
-      function onData(ch) {
-        if (ch === "\r" || ch === "\n") {
-          stdin.setRawMode(false);
-          stdin.pause();
-          stdin.removeListener("data", onData);
-          process.stdout.write("\n");
-          resolve(chars.join(""));
-        } else if (ch === "\u0003") {
-          // Ctrl-C
-          stdin.setRawMode(false);
-          process.stdout.write("\n");
-          process.exit(1);
-        } else if (ch === "\u007f" || ch === "\b") {
-          chars.pop();
-        } else {
-          chars.push(ch);
-        }
-      }
-
-      stdin.on("data", onData);
-    } else {
-      // Fallback: readline without echo suppression
-      const rl = readline.createInterface({ input: stdin, output: process.stdout });
-      rl.question("", (answer) => {
-        rl.close();
-        process.stdout.write("\n");
-        resolve(answer);
-      });
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Core Playwright login (shared by headless + headed paths)
-// ---------------------------------------------------------------------------
-
-async function doLogin(page, { baseUrl, username, password, verbose, usernameSelector, passwordSelector }) {
-  const loginUrl = getLoginUrl(baseUrl);
-
-  // Default selectors with fallback chain
-  const userSel = usernameSelector ?? 'input[name="loginName"], input[name="username"], input[type="text"]';
-  const passSel = passwordSelector ?? 'input[name="password"], input[type="password"]';
-
-  if (verbose) process.stderr.write("Navigating to login page...\n");
-  await page.goto(loginUrl, { waitUntil: "networkidle", timeout: 60000 });
-
-  await page.waitForSelector(userSel, { timeout: 15000 });
-
-  const userInput = page.locator(userSel).first();
-  const passInput = page.locator(passSel).first();
-  await userInput.fill(username);
-  await passInput.fill(password);
-
-  let authToken = null;
-  let userId = null;
-
-  page.once("response", async (res) => {
-    if (res.url().includes("/sso/login") || res.url().includes("/auth/login")) {
-      try {
-        const h = res.headers();
-        authToken = h["ones-auth-token"] ?? null;
-        userId = h["ones-user-id"] ?? null;
-        if (!authToken) {
-          const body = await res.json();
-          authToken = body?.user?.token ?? null;
-          userId = body?.user?.uuid ?? null;
-        }
-      } catch { /* ignore */ }
-    }
-  });
-
-  await passInput.press("Enter");
-  await page.waitForFunction(
-    () => !location.href.includes("ldap/login") && !location.href.includes("3rd_party_connect"),
-    { timeout: 30000 }
-  );
-  await page.waitForLoadState("networkidle", { timeout: 30000 });
-  if (verbose) process.stderr.write(`Logged in. Token: ${authToken ? "ok" : "not captured"}\n`);
-  return { authToken, userId };
-}
-
-// ---------------------------------------------------------------------------
-// runLogin — interactive login with headless-first, headed fallback
-// ---------------------------------------------------------------------------
-
-export async function runLogin(options) {
-  const { baseUrl, verbose, usernameSelector, passwordSelector } = options;
-  const username = await promptVisible("Username: ");
-  const password = await promptHidden("Password: ");
-
-  // --- Headless attempt ---
-  if (verbose) process.stderr.write("Trying headless login...\n");
-  let browser = await chromium.launch({ headless: true });
-  let context = await browser.newContext();
-  let page = await context.newPage();
-
-  let authToken = null;
-  let userId = null;
-
-  try {
-    ({ authToken, userId } = await doLogin(page, { baseUrl, username, password, verbose, usernameSelector, passwordSelector }));
-  } catch (err) {
-    if (verbose) process.stderr.write(`Headless login error: ${err.message}\n`);
-  } finally {
-    await browser.close();
-  }
-
-  // --- Headed fallback ---
-  if (!authToken) {
-    process.stderr.write("Headless login did not capture token. Falling back to headed browser...\n");
-    browser = await chromium.launch({ headless: false });
-    context = await browser.newContext();
-    page = await context.newPage();
-
-    // Attach a persistent response listener to capture the token at any point
-    page.on("response", async (res) => {
-      if (authToken) return;
-      if (res.url().includes("/sso/login") || res.url().includes("/auth/login")) {
-        try {
-          const h = res.headers();
-          authToken = h["ones-auth-token"] ?? null;
-          userId = h["ones-user-id"] ?? null;
-          if (!authToken) {
-            const body = await res.json();
-            authToken = body?.user?.token ?? null;
-            userId = body?.user?.uuid ?? null;
-          }
-        } catch { /* ignore */ }
-      }
-    });
-
-    try {
-      await doLogin(page, { baseUrl, username, password, verbose, usernameSelector, passwordSelector });
-    } catch (err) {
-      if (verbose) process.stderr.write(`Headed login error: ${err.message}\n`);
-    } finally {
-      await browser.close();
-    }
-  }
-
-  if (authToken) {
-    await writeCredentials({ authToken, userId, baseUrl });
-    process.stdout.write(`Login successful. Credentials saved to ${getCredentialsPath()}\n`);
-  } else {
-    process.stderr.write("Login failed: auth token was not captured.\n");
-    process.exitCode = 1;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// loadAuth — read credentials for use in other commands
+// loadAuth — read credentials for use in server
 // ---------------------------------------------------------------------------
 
 export async function loadAuth(cliBaseUrl) {
@@ -333,10 +171,11 @@ export async function loadAuth(cliBaseUrl) {
   const authToken = creds.authToken;
   const userId = creds.userId;
   const baseUrl = cliBaseUrl ?? creds.baseUrl;
+  const teamId = creds.teamId;
 
   if (!authToken || !userId || !baseUrl) {
-    throw new Error("Run: node src/ones-subtasks-cli.mjs login");
+    throw new Error("Not authenticated");
   }
 
-  return { authToken, userId, baseUrl };
+  return { authToken, userId, baseUrl, teamId };
 }
