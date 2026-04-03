@@ -49,6 +49,9 @@
   .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #e5e7eb; border-top-color: #6366f1; border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .copied { background: #10b981 !important; }
+  .progress-bar { width: 100%; height: 6px; background: #e5e7eb; border-radius: 3px; overflow: hidden; margin-top: 8px; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, #6366f1, #8b5cf6); transition: width 0.3s ease; border-radius: 3px; }
+  .progress-text { font-size: 0.8125rem; color: #6b7280; margin-top: 4px; }
 </style>
 </head>
 <body>
@@ -65,6 +68,12 @@
       <span class="status" id="status"></span>
     </div>
     <div class="hint" id="authHint"></div>
+    <div id="progressContainer" style="display:none">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width:0%"></div>
+      </div>
+      <div class="progress-text" id="progressText"></div>
+    </div>
     <div class="preview-chips" id="chips"></div>
   </div>
 
@@ -174,6 +183,22 @@ function renderChips(taskIds) {
   el.innerHTML = taskIds.map(id => `<span class="chip">${id}</span>`).join('');
 }
 
+function updateProgress(current, total, message) {
+  const container = document.getElementById('progressContainer');
+  const fill = document.getElementById('progressFill');
+  const text = document.getElementById('progressText');
+
+  if (total === 0) {
+    container.style.display = 'none';
+    return;
+  }
+
+  container.style.display = 'block';
+  const percent = Math.round((current / total) * 100);
+  fill.style.width = percent + '%';
+  text.textContent = `${message} (${current}/${total})`;
+}
+
 async function parse() {
   const text = document.getElementById('input').value.trim();
   if (!text) { setStatus('请先粘贴文本', true); return; }
@@ -185,40 +210,60 @@ async function parse() {
   setStatus(`已提取 ${taskIds.length} 个任务 ID，正在抓取...`);
   setAuthHint(context.baseUrl ? `已识别站点：${context.baseUrl}${context.teamId ? `，团队：${context.teamId}` : ''}` : '');
   document.getElementById('parseBtn').disabled = true;
+  updateProgress(0, taskIds.length, '准备开始');
   document.getElementById('tbody').innerHTML = '<tr><td colspan="5" class="loading"><span class="spinner"></span>加载中...</td></tr>';
   document.getElementById('resultsSection').style.display = '';
 
   try {
-    const resp = await fetch('/api/crawl', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ taskIds, baseUrl: authContext.baseUrl || context.baseUrl || undefined, teamId: authContext.teamId || context.teamId || undefined }),
-    });
-    const data = await resp.json();
-    if (!resp.ok) {
-      if (data.error === 'auth_required' || data.error === 'token_expired') {
-        updateAuthContext(data);
-        showAuthButton(true, data.error === 'token_expired' ? '重新连接 ONES' : '连接 ONES');
-        setAuthHint(`将打开一个浏览器窗口用于登录 ONES，完成后会自动重试。${authContext.baseUrl ? ` 当前站点：${authContext.baseUrl}` : ''}`);
+    // 逐个解析任务以显示进度
+    const allTasks = [];
+    const roots = [];
+
+    for (let i = 0; i < taskIds.length; i++) {
+      updateProgress(i + 1, taskIds.length, `正在解析任务 ${taskIds[i]}`);
+
+      const resp = await fetch('/api/crawl', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          taskIds: [taskIds[i]],
+          baseUrl: authContext.baseUrl || context.baseUrl || undefined,
+          teamId: authContext.teamId || context.teamId || undefined
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        if (data.error === 'auth_required' || data.error === 'token_expired') {
+          updateAuthContext(data);
+          showAuthButton(true, data.error === 'token_expired' ? '重新连接 ONES' : '连接 ONES');
+          setAuthHint(`将打开一个浏览器窗口用于登录 ONES，完成后会自动重试。${authContext.baseUrl ? ` 当前站点：${authContext.baseUrl}` : ''}`);
+        }
+        const msg = data.error === 'token_expired'
+          ? '登录状态已过期，请点击”连接 ONES”重新登录'
+          : data.error === 'auth_required'
+            ? '当前还没有可用的 ONES 凭据，请先连接 ONES'
+            : (data.detail ?? data.error ?? '抓取失败');
+        setStatus(msg, true);
+        document.getElementById('tbody').innerHTML = `<tr><td colspan=”5” class=”empty”>${msg}</td></tr>`;
+        updateProgress(0, 0, '');
+        return;
       }
-      const msg = data.error === 'token_expired'
-        ? '登录状态已过期，请点击“连接 ONES”重新登录'
-        : data.error === 'auth_required'
-          ? '当前还没有可用的 ONES 凭据，请先连接 ONES'
-          : (data.detail ?? data.error ?? '抓取失败');
-      setStatus(msg, true);
-      document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`;
-      return;
+
+      if (data.roots) roots.push(...data.roots);
+      if (data.tasks) allTasks.push(...data.tasks);
     }
+
     showAuthButton(false);
-    updateAuthContext(data);
-    allTasks = data.tasks ?? [];
+    updateAuthContext({ baseUrl: authContext.baseUrl, teamId: authContext.teamId });
+    allTasks = allTasks;
     collapsed = new Set();
     renderTable();
     setStatus(`共获取 ${allTasks.length} 条任务`);
+    updateProgress(0, 0, '');
     document.getElementById('countLabel').textContent = `共 ${allTasks.length} 条`;
   } catch (e) {
     setStatus('网络错误：' + e.message, true);
+    updateProgress(0, 0, '');
   } finally {
     document.getElementById('parseBtn').disabled = false;
   }
@@ -382,6 +427,7 @@ function clearAll() {
   document.getElementById('status').textContent = '';
   setAuthHint('');
   showAuthButton(false);
+  updateProgress(0, 0, '');
   authContext = { baseUrl: '', teamId: '' };
   document.getElementById('resultsSection').style.display = 'none';
   allTasks = [];

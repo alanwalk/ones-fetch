@@ -79,6 +79,37 @@ Categories=Utility;
 }
 
 async function main() {
+  // 检测是否是通过 npx 或 postinstall 运行
+  const isPostInstall = process.env.npm_lifecycle_event === 'postinstall';
+
+  if (isPostInstall) {
+    // postinstall 时只创建快捷方式，不安装依赖
+    console.log('ONES Fetch 安装后配置\n');
+    console.log('正在创建桌面快捷方式...');
+    try {
+      const os = platform();
+      if (os === 'win32') {
+        await createWindowsShortcut();
+      } else if (os === 'darwin') {
+        await createMacShortcut();
+      } else {
+        await createLinuxShortcut();
+      }
+    } catch (err) {
+      console.error('✗ 快捷方式创建失败:', err.message);
+      // 不退出，允许安装继续
+    }
+    console.log('\n✓ 配置完成！');
+    console.log('\n使用方法：');
+    console.log('  1. 双击桌面上的 "ONES 采集工具" 图标');
+    console.log('  2. 浏览器会自动打开工具页面');
+    console.log('\n或者在命令行运行：');
+    console.log(`  cd ${projectRoot}`);
+    console.log('  npm start');
+    return;
+  }
+
+  // npx 运行时的完整安装流程
   console.log('ONES Fetch 安装程序\n');
 
   // 安装依赖
