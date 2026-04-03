@@ -1,6 +1,6 @@
 {
   "name": "ones-fetch",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {
@@ -13,7 +13,12 @@
   "dependencies": {
     "playwright-core": "^1.58.2"
   },
-  "keywords": ["ones", "task", "crawler", "project-management"],
+  "keywords": [
+    "ones",
+    "task",
+    "crawler",
+    "project-management"
+  ],
   "author": "",
   "license": "MIT"
 }

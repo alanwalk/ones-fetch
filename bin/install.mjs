@@ -14,7 +14,7 @@ const projectRoot = join(__dirname, '..');
 async function createWindowsShortcut() {
   const desktop = join(homedir(), 'Desktop');
   const shortcutPath = join(desktop, 'ONES 采集工具.lnk');
-  const iconPath = join(projectRoot, 'public', 'icon.png');
+  const iconPath = join(projectRoot, 'public', 'icon.ico');
   const vbsLauncher = join(projectRoot, 'public', 'launcher.vbs');
 
   // 创建 PowerShell 脚本来生成快捷方式
@@ -24,7 +24,7 @@ $Shortcut = $WshShell.CreateShortcut("${shortcutPath.replace(/\\/g, '\\\\')}")
 $Shortcut.TargetPath = "wscript.exe"
 $Shortcut.Arguments = '"${vbsLauncher.replace(/\\/g, '\\\\')}"'
 $Shortcut.WorkingDirectory = "${projectRoot.replace(/\\/g, '\\\\')}"
-$Shortcut.IconLocation = "${iconPath.replace(/\\/g, '\\\\')}"
+$Shortcut.IconLocation = "${iconPath.replace(/\\/g, '\\\\')},0"
 $Shortcut.Description = "ONES 任务采集工具"
 $Shortcut.Save()
 `;

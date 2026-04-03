@@ -365,6 +365,21 @@ async function handleCrawl(req, res) {
   }
 }
 
+// Heartbeat tracking
+let lastHeartbeat = Date.now();
+const HEARTBEAT_TIMEOUT = 2 * 60 * 1000; // 2 minutes
+const HEARTBEAT_CHECK_INTERVAL = 30 * 1000; // 30 seconds
+
+function startHeartbeatMonitor() {
+  setInterval(() => {
+    const now = Date.now();
+    if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
+      process.stdout.write('No heartbeat received for 5 minutes, shutting down server...\n');
+      process.exit(0);
+    }
+  }, HEARTBEAT_CHECK_INTERVAL);
+}
+
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     try {
@@ -374,6 +389,12 @@ const server = http.createServer(async (req, res) => {
     } catch {
       res.writeHead(404); res.end('index.html not found');
     }
+    return;
+  }
+  if (req.method === 'GET' && req.url === '/api/heartbeat') {
+    lastHeartbeat = Date.now();
+    res.writeHead(204);
+    res.end();
     return;
   }
   if (req.method === 'GET' && req.url === '/api/auth/status') {
@@ -392,4 +413,16 @@ server.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
   process.stdout.write(`ONES Fetch Web UI → ${url}\n`);
   openBrowser(url);
+  startHeartbeatMonitor();
+});
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    process.stdout.write(`Port ${PORT} is already in use. Opening browser to existing instance...\n`);
+    openBrowser(`http://localhost:${PORT}`);
+    process.exit(0);
+  } else {
+    process.stderr.write(`Server error: ${err.message}\n`);
+    process.exit(1);
+  }
 });
