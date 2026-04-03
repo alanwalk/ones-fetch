@@ -70,7 +70,25 @@ async function extractSessionFromPage(page) {
 }
 
 export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verbose = false }) {
-  const browser = await chromium.launch({ headless: false });
+  // Use system browser: Edge on Windows, Chrome on other platforms
+  const launchOptions = {
+    headless: false,
+    channel: process.platform === 'win32' ? 'msedge' : 'chrome',
+  };
+
+  let browser;
+  try {
+    browser = await chromium.launch(launchOptions);
+  } catch (error) {
+    // If system browser fails, try without channel (requires playwright browsers installed)
+    if (verbose) process.stderr.write(`System browser launch failed, trying bundled browser: ${error.message}\n`);
+    try {
+      browser = await chromium.launch({ headless: false });
+    } catch (fallbackError) {
+      throw new Error(`Failed to launch browser. Please ensure Microsoft Edge is installed, or run: npx playwright install chromium`);
+    }
+  }
+
   const context = await browser.newContext();
   const page = await context.newPage();
   const loginUrl = getLoginUrl(baseUrl);

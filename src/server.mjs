@@ -10,8 +10,16 @@ const PUBLIC_DIR = join(__dirname, '..', 'public');
 const PORT = process.env.PORT ?? 3000;
 
 function openBrowser(url) {
-  const start = process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'start' : 'xdg-open';
-  exec(`${start} ${url}`);
+  let command;
+  if (process.platform === 'darwin') {
+    command = `open "${url}"`;
+  } else if (process.platform === 'win32') {
+    // On Windows, use 'start ""' with quoted URL to handle special characters
+    command = `start "" "${url}"`;
+  } else {
+    command = `xdg-open "${url}"`;
+  }
+  exec(command);
 }
 
 const authFlow = {
@@ -367,14 +375,14 @@ async function handleCrawl(req, res) {
 
 // Heartbeat tracking
 let lastHeartbeat = Date.now();
-const HEARTBEAT_TIMEOUT = 2 * 60 * 1000; // 2 minutes
-const HEARTBEAT_CHECK_INTERVAL = 30 * 1000; // 30 seconds
+const HEARTBEAT_TIMEOUT = 30 * 1000; // 30 seconds
+const HEARTBEAT_CHECK_INTERVAL = 10 * 1000; // 10 seconds
 
 function startHeartbeatMonitor() {
   setInterval(() => {
     const now = Date.now();
     if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-      process.stdout.write('No heartbeat received for 5 minutes, shutting down server...\n');
+      process.stdout.write('No heartbeat received for 30 seconds, shutting down server...\n');
       process.exit(0);
     }
   }, HEARTBEAT_CHECK_INTERVAL);

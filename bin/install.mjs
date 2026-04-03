@@ -3,7 +3,7 @@
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir, platform } from 'node:os';
-import { writeFile, mkdir, cp, access } from 'node:fs/promises';
+import { writeFile, mkdir, cp, access, rm, readFile } from 'node:fs/promises';
 import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
 
@@ -17,9 +17,59 @@ const installDir = join(homedir(), '.ones-fetch');
 async function ensureInstallDir() {
   try {
     await access(installDir);
-    console.log(`使用现有安装目录: ${installDir}`);
+    console.log(`检测到现有安装目录: ${installDir}`);
+
+    // 检查版本是否需要更新
+    let needsUpdate = false;
+    try {
+      const installedPkgPath = join(installDir, 'package.json');
+      const currentPkgPath = join(projectRoot, 'package.json');
+
+      const installedPkg = JSON.parse(await readFile(installedPkgPath, 'utf8'));
+      const currentPkg = JSON.parse(await readFile(currentPkgPath, 'utf8'));
+
+      if (installedPkg.version !== currentPkg.version) {
+        console.log(`检测到版本更新: ${installedPkg.version} → ${currentPkg.version}`);
+        needsUpdate = true;
+      }
+    } catch {
+      // 如果无法读取版本信息，假设需要更新
+      needsUpdate = true;
+    }
+
+    if (needsUpdate) {
+      console.log('正在清理旧版本文件...');
+      // 清理旧的项目文件，但保留 credentials.json 和 node_modules
+      const dirsToClean = ['src', 'public', 'bin'];
+      const filesToClean = ['package.json', 'package-lock.json'];
+
+      for (const dir of dirsToClean) {
+        try {
+          await rm(join(installDir, dir), { recursive: true, force: true });
+        } catch {}
+      }
+
+      for (const file of filesToClean) {
+        try {
+          await rm(join(installDir, file), { force: true });
+        } catch {}
+      }
+
+      console.log('✓ 旧版本文件清理完成');
+      console.log('正在复制新版本文件...');
+
+      // 复制新版本文件
+      await cp(join(projectRoot, 'src'), join(installDir, 'src'), { recursive: true });
+      await cp(join(projectRoot, 'public'), join(installDir, 'public'), { recursive: true });
+      await cp(join(projectRoot, 'bin'), join(installDir, 'bin'), { recursive: true });
+      await cp(join(projectRoot, 'package.json'), join(installDir, 'package.json'));
+      await cp(join(projectRoot, 'package-lock.json'), join(installDir, 'package-lock.json')).catch(() => {});
+      console.log('✓ 新版本文件复制完成');
+    } else {
+      console.log('版本已是最新，跳过文件更新');
+    }
   } catch {
-    // 目录不存在，复制项目文件
+    // 目录不存在，首次安装
     console.log(`正在复制项目文件到 ${installDir}...`);
     await mkdir(installDir, { recursive: true });
 

@@ -23,6 +23,7 @@
   .btn-secondary:hover:not(:disabled) { background: #d1d5db; }
   .btn-success { background: #10b981; color: #fff; }
   .btn-success:hover:not(:disabled) { background: #059669; }
+  #copyBtn { min-width: 110px; }
   .btn-link { background: #f59e0b; color: #fff; }
   .btn-link:hover:not(:disabled) { background: #d97706; }
   .status { font-size: 0.8125rem; color: #6b7280; }
@@ -126,6 +127,33 @@ window.addEventListener('beforeunload', () => {
 // Start heartbeat on page load
 startHeartbeat();
 
+// Check auth status on page load
+async function checkInitialAuthStatus() {
+  try {
+    const resp = await fetch('/api/auth/status');
+    const data = await resp.json();
+
+    if (data.status === 'unauthenticated') {
+      updateAuthContext(data);
+      showAuthButton(true, '连接 ONES');
+      if (data.baseUrl) {
+        setAuthHint(`当前站点：${data.baseUrl}${data.teamId ? `，团队：${data.teamId}` : ''}`);
+      }
+    } else if (data.status === 'authenticated') {
+      updateAuthContext(data);
+      showAuthButton(false);
+      if (data.baseUrl) {
+        setAuthHint(`已连接：${data.baseUrl}${data.teamId ? `，团队：${data.teamId}` : ''}`);
+      }
+    }
+  } catch (e) {
+    // Ignore initial auth check errors
+  }
+}
+
+// Check auth status when page loads
+checkInitialAuthStatus();
+
 function extractContext(text) {
   const match = text.match(/(https?:\/\/[^/\s]+)\/project\/#\/team\/([^/\s]+)\/task\/([A-Za-z0-9]{10,})/);
   if (!match) return { baseUrl: '', teamId: '' };
@@ -133,20 +161,16 @@ function extractContext(text) {
 }
 
 function extractTaskIds(text) {
-  const uuids = [];
   const numbers = [];
 
-  for (const match of text.matchAll(/\/task\/([A-Za-z0-9]{10,})/g)) {
-    uuids.push(match[1]);
-  }
-
+  // 只提取 #数字 格式的编号
   const textWithoutUrls = text.replace(/https?:\/\/[^\s]+/g, '');
   for (const match of textWithoutUrls.matchAll(/#(\d+)/g)) {
     numbers.push(match[1]);
   }
 
   const seen = new Set();
-  return [...uuids, ...numbers].filter(id => {
+  return numbers.filter(id => {
     if (seen.has(id)) return false;
     seen.add(id);
     return true;
@@ -216,7 +240,7 @@ async function parse() {
 
   try {
     // 逐个解析任务以显示进度
-    const allTasks = [];
+    const fetchedTasks = [];
     const roots = [];
 
     for (let i = 0; i < taskIds.length; i++) {
@@ -250,12 +274,12 @@ async function parse() {
       }
 
       if (data.roots) roots.push(...data.roots);
-      if (data.tasks) allTasks.push(...data.tasks);
+      if (data.tasks) fetchedTasks.push(...data.tasks);
     }
 
     showAuthButton(false);
     updateAuthContext({ baseUrl: authContext.baseUrl, teamId: authContext.teamId });
-    allTasks = allTasks;
+    allTasks = fetchedTasks;
     collapsed = new Set();
     renderTable();
     setStatus(`共获取 ${allTasks.length} 条任务`);
