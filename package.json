@@ -1,14 +1,19 @@
 {
   "name": "ones-fetch",
-  "version": "0.2.0",
-  "private": true,
+  "version": "1.0.0",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
+  "bin": {
+    "ones-fetch": "./bin/install.mjs"
+  },
   "scripts": {
     "start": "node src/server.mjs",
     "dev": "node --watch src/server.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.58.2"
-  }
+  },
+  "keywords": ["ones", "task", "crawler", "project-management"],
+  "author": "",
+  "license": "MIT"
 }

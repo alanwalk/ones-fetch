@@ -1,0 +1,7 @@
+.git
+.gitignore
+node_modules
+.omc
+*.log
+.DS_Store
+Thumbs.db
