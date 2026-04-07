@@ -7,7 +7,7 @@
 策划电脑上已有 Node.js，执行一条命令即可：
 
 ```bash
-npx ones-fetch
+npx ones-fetch@latest
 ```
 
 或者使用 npm 安装：
@@ -60,7 +60,7 @@ npm start
 npm run dev
 ```
 
-启动后会自动打开浏览器访问 `http://localhost:3000`。
+启动后会自动打开浏览器访问 `http://localhost:36781`。
 
 ### 使用流程
 
@@ -132,7 +132,7 @@ npm run dev
 
 | 变量 | 说明 |
 |---|---|
-| `PORT` | 服务端口（默认 3000） |
+| `PORT` | 服务端口（默认 36781） |
 | `ONES_BASE_URL` | ONES 基础 URL |
 | `ONES_TEAM_ID` | 团队 UUID（通常自动检测） |
 
