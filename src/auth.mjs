@@ -70,6 +70,11 @@ async function extractSessionFromPage(page) {
 }
 
 export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verbose = false }) {
+  const diag = (message) => {
+    if (!verbose) return;
+    process.stdout.write(`[ones-auth] ${message}\n`);
+  };
+
   // Use system browser: Edge on Windows, Chrome on other platforms
   const launchOptions = {
     headless: false,
@@ -92,12 +97,15 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
   const context = await browser.newContext();
   const page = await context.newPage();
   const loginUrl = getLoginUrl(baseUrl);
+  diag(`start capture baseUrl=${baseUrl} loginUrl=${loginUrl} channel=${launchOptions.channel ?? 'bundled'}`);
 
   let resolved = false;
 
   return new Promise(async (resolve, reject) => {
     const finish = async (result, error) => {
       if (resolved) return;
+      const outcome = error ? `error=${error.message}` : `success userId=${result?.userId ?? 'unknown'} teamId=${result?.teamId ?? 'unknown'}`;
+      diag(`finish ${outcome}; closing browser`);
       try {
         if (error) throw error;
         const credentialsToSave = { ...result, baseUrl };
@@ -128,6 +136,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
         // Cross-page transitions can temporarily break page evaluation.
       }
       if (session?.authToken && session?.userId) {
+        diag(`session detected from page url=${page.url()} userId=${session.userId} teamId=${session.teamId ?? 'unknown'}`);
         await finish(session, null);
       }
     };
@@ -146,6 +155,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
             const teamMatch = currentUrl.match(/\/team\/([a-zA-Z0-9]{16,})/);
             if (teamMatch) teamId = teamMatch[1];
           } catch { /* ignore */ }
+          diag(`session detected from response url=${res.url()} userId=${userId} teamId=${teamId ?? 'unknown'}`);
           await finish({ authToken, userId, teamId }, null);
           return;
         }
@@ -156,10 +166,12 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
     };
 
     const onNavigation = () => {
+      diag(`navigated url=${page.url()}`);
       void tryPageSession();
     };
 
     const timeout = setTimeout(() => {
+      diag(`timeout after ${timeoutMs}ms`);
       void finish(null, new Error("LOGIN_TIMEOUT"));
     }, timeoutMs);
 
@@ -171,10 +183,11 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
     page.on("framenavigated", onNavigation);
 
     try {
-      if (verbose) process.stderr.write(`Opening browser login at ${loginUrl}\n`);
+      diag(`goto ${loginUrl}`);
       await page.goto(loginUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
       await tryPageSession();
     } catch (error) {
+      diag(`goto failed error=${error instanceof Error ? error.message : String(error)}`);
       await finish(null, error instanceof Error ? error : new Error(String(error)));
     }
   });

@@ -116,7 +116,7 @@ function startHeartbeat() {
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(() => {
     fetch('/api/heartbeat').catch(() => {});
-  }, 60000); // Every 60 seconds
+  }, 10000); // Every 10 seconds
 }
 
 // Stop heartbeat when page unloads
@@ -135,7 +135,6 @@ async function checkInitialAuthStatus() {
 
     if (data.status === 'unauthenticated') {
       updateAuthContext(data);
-      showAuthButton(true, '连接 ONES');
       if (data.baseUrl) {
         setAuthHint(`当前站点：${data.baseUrl}${data.teamId ? `，团队：${data.teamId}` : ''}`);
       }
@@ -158,6 +157,13 @@ function extractContext(text) {
   const match = text.match(/(https?:\/\/[^/\s]+)\/project\/#\/team\/([^/\s]+)\/task\/([A-Za-z0-9]{10,})/);
   if (!match) return { baseUrl: '', teamId: '' };
   return { baseUrl: match[1], teamId: match[2] };
+}
+
+function getCurrentInputState() {
+  const text = document.getElementById('input').value.trim();
+  const taskIds = extractTaskIds(text);
+  const context = extractContext(text);
+  return { text, taskIds, context, hasBaseUrl: Boolean(context.baseUrl) };
 }
 
 function extractTaskIds(text) {
@@ -224,12 +230,24 @@ function updateProgress(current, total, message) {
 }
 
 async function parse() {
-  const text = document.getElementById('input').value.trim();
+  const { text, taskIds, context, hasBaseUrl } = getCurrentInputState();
   if (!text) { setStatus('请先粘贴文本', true); return; }
-  const taskIds = extractTaskIds(text);
-  const context = extractContext(text);
   updateAuthContext(context);
-  if (taskIds.length === 0) { setStatus('未找到任务 ID（支持 /task/UUID 链接或 #数字编号）', true); return; }
+
+  if (!hasBaseUrl) {
+    showAuthButton(false);
+    setAuthHint('');
+    setStatus('未检测到有效 ONES 地址，请粘贴正确的任务文本', true);
+    return;
+  }
+
+  if (taskIds.length === 0) {
+    showAuthButton(false);
+    setStatus('未找到任务 ID（支持 /task/UUID 链接或 #数字编号）', true);
+    setAuthHint(`已识别站点：${context.baseUrl}${context.teamId ? `，团队：${context.teamId}` : ''}`);
+    return;
+  }
+
   renderChips(taskIds);
   setStatus(`已提取 ${taskIds.length} 个任务 ID，正在抓取...`);
   setAuthHint(context.baseUrl ? `已识别站点：${context.baseUrl}${context.teamId ? `，团队：${context.teamId}` : ''}` : '');
@@ -260,7 +278,7 @@ async function parse() {
         if (data.error === 'auth_required' || data.error === 'token_expired') {
           updateAuthContext(data);
           showAuthButton(true, data.error === 'token_expired' ? '重新连接 ONES' : '连接 ONES');
-          setAuthHint(`将打开一个浏览器窗口用于登录 ONES，完成后会自动重试。${authContext.baseUrl ? ` 当前站点：${authContext.baseUrl}` : ''}`);
+          setAuthHint(`已识别站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}。第一次解析前请先连接 ONES。`);
         }
         const msg = data.error === 'token_expired'
           ? '登录状态已过期，请点击”连接 ONES”重新登录'
@@ -294,13 +312,14 @@ async function parse() {
 }
 
 async function connectOnes() {
-  const text = document.getElementById('input').value;
-  const context = extractContext(text);
+  const { context, hasBaseUrl } = getCurrentInputState();
   updateAuthContext(context);
   const btn = document.getElementById('authBtn');
 
-  if (!authContext.baseUrl) {
-    setStatus('当前没有可用的 ONES 站点地址，请先粘贴任务链接或配置 ONES_BASE_URL', true);
+  if (!hasBaseUrl) {
+    showAuthButton(false);
+    setAuthHint('');
+    setStatus('未检测到有效 ONES 地址，请先粘贴正确的任务文本', true);
     return;
   }
 
@@ -311,7 +330,7 @@ async function connectOnes() {
   const resp = await fetch('/api/auth/login', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ baseUrl: authContext.baseUrl, teamId: authContext.teamId || undefined }),
+    body: JSON.stringify({ baseUrl: context.baseUrl, teamId: context.teamId || undefined }),
   });
   const data = await resp.json();
   if (!resp.ok) {
@@ -322,35 +341,45 @@ async function connectOnes() {
   }
 
   updateAuthContext(data);
-  setAuthHint(`已打开 ${authContext.baseUrl} 的登录窗口，登录完成后将自动重试解析。`);
+  setAuthHint(`已打开 ${context.baseUrl} 的登录窗口，登录完成后将自动重试本次解析。`);
   startAuthPolling();
 }
 
 function startAuthPolling() {
   if (authPollingTimer) window.clearInterval(authPollingTimer);
   authPollingTimer = window.setInterval(async () => {
-    const resp = await fetch('/api/auth/status');
-    const data = await resp.json();
-    if (data.status === 'pending') {
-      showAuthButton(true, '等待登录完成...');
-      document.getElementById('authBtn').disabled = true;
-      return;
+    try {
+      const resp = await fetch('/api/auth/status');
+      const data = await resp.json();
+      if (data.status === 'pending') {
+        showAuthButton(true, '等待登录完成...');
+        document.getElementById('authBtn').disabled = true;
+        return;
+      }
+
+      window.clearInterval(authPollingTimer);
+      authPollingTimer = null;
+
+      if (data.status === 'authenticated') {
+        updateAuthContext(data);
+        showAuthButton(false);
+        setStatus('ONES 已连接，正在重新解析...');
+        setAuthHint(`当前站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}`);
+        const { text, hasBaseUrl, taskIds } = getCurrentInputState();
+        if (text && hasBaseUrl && taskIds.length > 0) {
+          await parse();
+        }
+        return;
+      }
+
+      showAuthButton(true, '连接 ONES');
+      setStatus(data.error === 'LOGIN_TIMEOUT' ? '登录超时，请重试' : '登录未完成，请重试', true);
+    } catch (e) {
+      window.clearInterval(authPollingTimer);
+      authPollingTimer = null;
+      showAuthButton(true, '连接 ONES');
+      setStatus('登录状态检查失败：' + e.message, true);
     }
-
-    window.clearInterval(authPollingTimer);
-    authPollingTimer = null;
-
-    if (data.status === 'authenticated') {
-      updateAuthContext(data);
-      showAuthButton(false);
-      setStatus('ONES 已连接，正在重新解析...');
-      setAuthHint(`当前站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}`);
-      await parse();
-      return;
-    }
-
-    showAuthButton(true, '连接 ONES');
-    setStatus(data.error === 'LOGIN_TIMEOUT' ? '登录超时，请重试' : '登录未完成，请重试', true);
   }, 1500);
 }
 
@@ -451,6 +480,10 @@ function clearAll() {
   document.getElementById('status').textContent = '';
   setAuthHint('');
   showAuthButton(false);
+  if (authPollingTimer) {
+    window.clearInterval(authPollingTimer);
+    authPollingTimer = null;
+  }
   updateProgress(0, 0, '');
   authContext = { baseUrl: '', teamId: '' };
   document.getElementById('resultsSection').style.display = 'none';
@@ -459,13 +492,12 @@ function clearAll() {
 
 // Auto-extract chips on input
 document.getElementById('input').addEventListener('input', () => {
-  const text = document.getElementById('input').value;
-  const taskIds = extractTaskIds(text);
-  const context = extractContext(text);
+  const { taskIds, context, hasBaseUrl } = getCurrentInputState();
   updateAuthContext(context);
   renderChips(taskIds);
   setStatus(taskIds.length ? `检测到 ${taskIds.length} 个任务 ID` : '');
-  setAuthHint(authContext.baseUrl ? `已识别站点：${authContext.baseUrl}${authContext.teamId ? `，团队：${authContext.teamId}` : ''}` : '');
+  showAuthButton(false);
+  setAuthHint(hasBaseUrl ? `已识别站点：${context.baseUrl}${context.teamId ? `，团队：${context.teamId}` : ''}` : '');
 });
 </script>
 </body>

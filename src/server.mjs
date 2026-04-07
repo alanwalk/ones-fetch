@@ -7,7 +7,7 @@ import { exec } from 'node:child_process';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
-const PORT = process.env.PORT ?? 3000;
+const PORT = process.env.PORT ?? 36781;
 
 function openBrowser(url) {
   let command;
@@ -304,7 +304,7 @@ async function handleAuthLogin(req, res) {
   void (async () => {
     try {
       const { runBrowserLoginCapture } = await import('./auth.mjs');
-      await runBrowserLoginCapture({ baseUrl: context.baseUrl });
+      await runBrowserLoginCapture({ baseUrl: context.baseUrl, verbose: true });
       authFlow.status = 'idle';
       authFlow.error = null;
       authFlow.baseUrl = '';
