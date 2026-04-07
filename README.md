@@ -7,7 +7,7 @@
 策划电脑上已有 Node.js，执行一条命令即可：
 
 ```bash
-npx ones-fetch@latest
+npx ones-fetch@latest install
 ```
 
 或者使用 npm 安装：

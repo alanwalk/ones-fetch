@@ -1,10 +1,10 @@
 {
   "name": "ones-fetch",
-  "version": "1.4.4",
+  "version": "1.4.5",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {
-    "ones-fetch": "./bin/cli.js"
+    "ones-fetch": "bin/cli.mjs"
   },
   "scripts": {
     "start": "node src/server.mjs",
