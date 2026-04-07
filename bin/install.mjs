@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, join } from 'node:path';
 import { homedir, platform } from 'node:os';
 import { writeFile, mkdir, cp, access, rm, readFile } from 'node:fs/promises';
@@ -155,39 +155,9 @@ Categories=Utility;
   console.log(`✓ 桌面快捷方式已创建: ${desktopFile}`);
 }
 
-async function main() {
-  // 检测是否是通过 npx 或 postinstall 运行
-  const isPostInstall = process.env.npm_lifecycle_event === 'postinstall';
-
-  // 确保安装目录存在
+export async function runInstallFlow() {
   await ensureInstallDir();
 
-  if (isPostInstall) {
-    // postinstall 时只创建快捷方式，不安装依赖
-    console.log('ONES Fetch 安装后配置\n');
-    console.log('正在创建桌面快捷方式...');
-    try {
-      const os = platform();
-      if (os === 'win32') {
-        await createWindowsShortcut();
-      } else if (os === 'darwin') {
-        await createMacShortcut();
-      } else {
-        await createLinuxShortcut();
-      }
-    } catch (err) {
-      console.error('✗ 快捷方式创建失败:', err.message);
-      // 不退出，允许安装继续
-    }
-    console.log('\n✓ 配置完成！');
-    console.log('\n使用方法：');
-    console.log('  1. 双击桌面上的 "ONES 采集工具" 图标');
-    console.log('  2. 浏览器会自动打开工具页面');
-    console.log(`\n项目位置：${installDir}`);
-    return;
-  }
-
-  // npx 运行时的完整安装流程
   console.log('ONES Fetch 安装程序\n');
 
   // 安装依赖
@@ -223,4 +193,9 @@ async function main() {
   console.log(`\n项目位置：${installDir}`);
 }
 
-main().catch(console.error);
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  runInstallFlow().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
+}
