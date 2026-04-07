@@ -1,6 +1,6 @@
 {
   "name": "ones-fetch",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {
@@ -8,8 +8,7 @@
   },
   "scripts": {
     "start": "node src/server.mjs",
-    "dev": "node --watch src/server.mjs",
-    "postinstall": "node bin/install.mjs"
+    "dev": "node --watch src/server.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.58.2"
