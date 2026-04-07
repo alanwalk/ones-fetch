@@ -128,7 +128,7 @@ async function createMacShortcut() {
 cd "${projectRoot}"
 node src/server.mjs &
 sleep 2
-open http://localhost:3000
+open http://localhost:36781
 `;
 
   await writeFile(appPath, scriptContent, 'utf8');
@@ -144,7 +144,7 @@ async function createLinuxShortcut() {
 Version=1.0
 Type=Application
 Name=ONES 采集工具
-Exec=bash -c "cd ${projectRoot} && node src/server.mjs & sleep 2 && xdg-open http://localhost:3000"
+Exec=bash -c "cd ${projectRoot} && node src/server.mjs & sleep 2 && xdg-open http://localhost:36781"
 Icon=utilities-terminal
 Terminal=false
 Categories=Utility;
