@@ -1,6 +1,6 @@
 {
   "name": "@alanwalk/ones-fetch",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {

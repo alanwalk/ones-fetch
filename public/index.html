@@ -44,6 +44,8 @@
   .num-cell { font-weight: 600; color: #4f46e5; white-space: nowrap; }
   .num-link { color: inherit; text-decoration: none; }
   .num-link:hover { text-decoration: underline; }
+  .truncate-text { display: inline-block; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
+  .link-text { display: inline-block; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; color: #2563eb; }
   .tag { display: inline-block; font-size: 0.7rem; padding: 2px 7px; border-radius: 4px; background: #dbeafe; color: #1d4ed8; }
   .empty { text-align: center; color: #9ca3af; padding: 40px; font-size: 0.875rem; }
   .loading { text-align: center; color: #6b7280; padding: 40px; }
@@ -80,6 +82,7 @@
 
   <div id="resultsSection" style="display:none">
     <div class="toolbar">
+      <button class="btn-success" id="copyTasksBtn" onclick="copyAllTasks()">复制所有任务</button>
       <button class="btn-success" id="copyBtn" onclick="copyAllNumbers()">复制所有编号</button>
       <button class="btn-secondary" onclick="expandAll()">展开全部</button>
       <button class="btn-secondary" onclick="collapseAll()">折叠全部</button>
@@ -92,9 +95,9 @@
             <tr>
               <th>编号</th>
               <th>标题</th>
+              <th>任务链接</th>
               <th>状态</th>
               <th>负责人</th>
-              <th>截止日期</th>
             </tr>
           </thead>
           <tbody id="tbody"></tbody>
@@ -269,7 +272,7 @@ async function parse() {
             ? '当前还没有可用的 ONES 凭据，请先连接 ONES'
             : (data.detail ?? data.error ?? '抓取失败');
         setStatus(msg, true);
-        document.getElementById('tbody').innerHTML = `<tr><td colspan=”5” class=”empty”>${msg}</td></tr>`;
+        document.getElementById('tbody').innerHTML = `<tr><td colspan="5" class="empty">${msg}</td></tr>`;
         updateProgress(0, 0, '');
         return;
       }
@@ -390,6 +393,21 @@ function flattenTree(nodes, depth = 0) {
   return result;
 }
 
+function getAllTasksInTreeOrder() {
+  const visit = (nodes, depth = 0) => {
+    const result = [];
+    for (const node of nodes) {
+      result.push({ ...node, _depth: depth });
+      if (node.children.length > 0) {
+        result.push(...visit(node.children, depth + 1));
+      }
+    }
+    return result;
+  };
+
+  return visit(buildTree(allTasks));
+}
+
 function renderTable() {
   const roots = buildTree(allTasks);
   const flat = flattenTree(roots);
@@ -402,15 +420,17 @@ function renderTable() {
     const taskUrl = authContext.baseUrl && authContext.teamId
       ? `${authContext.baseUrl}/project/#/team/${authContext.teamId}/task/${t.uuid}`
       : '';
-    const numberCell = taskUrl
-      ? `<a class="num-link" href="${escAttr(taskUrl)}" target="_blank" rel="noreferrer">#${esc(t.number ?? '')}</a>`
-      : `#${esc(t.number ?? '')}`;
+    const numberCell = `#${esc(t.number ?? '')}`;
+    const titleCell = `<span class="truncate-text" title="${escAttr(t.summary ?? '')}">${esc(t.summary ?? '')}</span>`;
+    const linkCell = taskUrl
+      ? `<a class="num-link link-text" href="${escAttr(taskUrl)}" target="_blank" rel="noreferrer" title="${escAttr(taskUrl)}">${esc(taskUrl)}</a>`
+      : '';
     return `<tr data-uuid="${t.uuid}">
       <td class="num-cell">${numberCell}</td>
-      <td>${indent}${toggleIcon}${esc(t.summary ?? '')}</td>
+      <td>${indent}${toggleIcon}${titleCell}</td>
+      <td>${linkCell}</td>
       <td>${t.status_name ? `<span class="tag">${esc(t.status_name)}</span>` : ''}</td>
       <td>${esc(t.assign_name ?? '')}</td>
-      <td>${esc(t.deadline ?? '')}</td>
     </tr>`;
   }).join('');
 
@@ -448,10 +468,29 @@ function copyAllNumbers() {
   const numbers = allTasks.map(t => `#${t.number}`).join('|');
   navigator.clipboard.writeText(numbers).then(() => {
     const btn = document.getElementById('copyBtn');
-      btn.textContent = '已复制 ✓';
-      btn.classList.add('copied');
-      setTimeout(() => {
+    btn.textContent = '已复制 ✓';
+    btn.classList.add('copied');
+    setTimeout(() => {
       btn.textContent = '复制所有编号';
+      btn.classList.remove('copied');
+    }, 2000);
+  });
+}
+
+function copyAllTasks() {
+  const taskLines = getAllTasksInTreeOrder().map((task) => {
+    const taskUrl = authContext.baseUrl && authContext.teamId
+      ? `${authContext.baseUrl}/project/#/team/${authContext.teamId}/task/${task.uuid}`
+      : '';
+    return [`#${task.number} ${task.summary ?? ''}`, taskUrl].filter(Boolean).join('\n');
+  }).join('\n');
+
+  navigator.clipboard.writeText(taskLines).then(() => {
+    const btn = document.getElementById('copyTasksBtn');
+    btn.textContent = '已复制 ✓';
+    btn.classList.add('copied');
+    setTimeout(() => {
+      btn.textContent = '复制所有任务';
       btn.classList.remove('copied');
     }, 2000);
   });

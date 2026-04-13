@@ -48,7 +48,7 @@ npm install
 ### 方式 1：双击启动（推荐给非技术用户）
 
 **Windows 用户：**
-- 双击桌面 `ONES 采集工具.lnk`
+- 双击桌面 `ones-fetch.lnk`
 - 浏览器会自动打开工具页面
 - Windows 启动入口已改为 `launch.cmd`，不再依赖 VBS
 - 如果双击没有反应，请重新执行一次 `npx @alanwalk/ones-fetch@latest install` 以刷新启动器

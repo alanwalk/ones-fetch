@@ -134,7 +134,7 @@ async function ensureInstallDir() {
 
 async function createWindowsShortcut() {
   const desktop = join(homedir(), 'Desktop');
-  const shortcutPath = join(desktop, 'ONES 采集工具.lnk');
+  const shortcutPath = join(desktop, 'ones-fetch.lnk');
   const iconPath = join(installDir, 'public', 'icon.ico');
   const cmdLauncher = join(installDir, 'public', 'launch.cmd');
   const cmdExe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe');
@@ -148,7 +148,7 @@ $Shortcut.Arguments = '/c ""${cmdLauncher.replace(/\\/g, '\\\\')}""'
 $Shortcut.WorkingDirectory = "${installDir.replace(/\\/g, '\\\\')}"
 $Shortcut.WindowStyle = 7
 $Shortcut.IconLocation = "${iconPath.replace(/\\/g, '\\\\')},0"
-$Shortcut.Description = "ONES 任务采集工具"
+$Shortcut.Description = "ones-fetch"
 $Shortcut.Save()
 `;
 
@@ -168,7 +168,7 @@ $Shortcut.Save()
 
 async function createMacShortcut() {
   const desktop = join(homedir(), 'Desktop');
-  const appPath = join(desktop, 'ONES 采集工具.command');
+  const appPath = join(desktop, 'ones-fetch.command');
 
   const scriptContent = `#!/bin/bash
 cd "${projectRoot}"
@@ -189,7 +189,7 @@ async function createLinuxShortcut() {
   const content = `[Desktop Entry]
 Version=1.0
 Type=Application
-Name=ONES 采集工具
+Name=ones-fetch
 Exec=bash -c "cd ${projectRoot} && node src/server.mjs & sleep 2 && xdg-open http://localhost:36781"
 Icon=utilities-terminal
 Terminal=false
@@ -235,7 +235,7 @@ export async function runInstallFlow() {
 
   console.log('\n✓ 安装完成！');
   console.log('\n使用方法：');
-  console.log('  1. 双击桌面上的 "ONES 采集工具" 图标');
+  console.log('  1. 双击桌面上的 "ones-fetch" 图标');
   console.log('  2. 浏览器会自动打开工具页面');
   console.log(`\n项目位置：${installDir}`);
 }
