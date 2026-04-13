@@ -7,13 +7,13 @@
 策划电脑上已有 Node.js，执行一条命令即可：
 
 ```bash
-npx ones-fetch@latest install
+npx @alanwalk/ones-fetch@latest install
 ```
 
 或者使用 npm 安装：
 
 ```bash
-npm install -g ones-fetch
+npm install -g @alanwalk/ones-fetch
 ```
 
 这会自动：
@@ -51,7 +51,7 @@ npm install
 - 双击桌面 `ONES 采集工具.lnk`
 - 浏览器会自动打开工具页面
 - Windows 启动入口已改为 `launch.cmd`，不再依赖 VBS
-- 如果双击没有反应，请重新执行一次 `npx ones-fetch@latest install` 以刷新启动器
+- 如果双击没有反应，请重新执行一次 `npx @alanwalk/ones-fetch@latest install` 以刷新启动器
 - 启动器日志在 `~/.ones-fetch/logs/launcher.log`
 - 服务运行日志在 `~/.ones-fetch/logs/runtime.log`
 

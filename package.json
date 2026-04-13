@@ -1,6 +1,6 @@
 {
-  "name": "ones-fetch",
-  "version": "1.5.0",
+  "name": "@alanwalk/ones-fetch",
+  "version": "2.0.0",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {
@@ -20,5 +20,8 @@
     "project-management"
   ],
   "author": "",
-  "license": "MIT"
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  }
 }
