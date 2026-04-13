@@ -1,6 +1,6 @@
 {
   "name": "ones-fetch",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "type": "module",
   "description": "ONES Fetch — Web app for recursive ONES subtask crawling",
   "bin": {

@@ -5,6 +5,7 @@ import os from "node:os";
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { chromium } from "playwright-core";
+import { logInfo, logWarn, logError } from "./logger.mjs";
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -72,7 +73,7 @@ async function extractSessionFromPage(page) {
 export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verbose = false }) {
   const diag = (message) => {
     if (!verbose) return;
-    process.stdout.write(`[ones-auth] ${message}\n`);
+    logInfo('auth.diag', { message });
   };
 
   // Use system browser: Edge on Windows, Chrome on other platforms
@@ -84,12 +85,18 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
   let browser;
   try {
     browser = await chromium.launch(launchOptions);
+    logInfo('auth.browser_launch_ok', { channel: launchOptions.channel ?? 'bundled' });
   } catch (error) {
     // If system browser fails, try without channel (requires playwright browsers installed)
-    if (verbose) process.stderr.write(`System browser launch failed, trying bundled browser: ${error.message}\n`);
+    logWarn('auth.browser_launch_fallback', {
+      channel: launchOptions.channel ?? 'bundled',
+      error: error instanceof Error ? error.message : String(error),
+    });
     try {
       browser = await chromium.launch({ headless: false });
+      logInfo('auth.browser_launch_ok', { channel: 'playwright-bundled' });
     } catch (fallbackError) {
+      logError('auth.browser_launch_failed', fallbackError, { baseUrl });
       throw new Error(`Failed to launch browser. Please ensure Microsoft Edge is installed, or run: npx playwright install chromium`);
     }
   }
@@ -97,6 +104,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
   const context = await browser.newContext();
   const page = await context.newPage();
   const loginUrl = getLoginUrl(baseUrl);
+  logInfo('auth.capture_start', { baseUrl, loginUrl, timeoutMs });
   diag(`start capture baseUrl=${baseUrl} loginUrl=${loginUrl} channel=${launchOptions.channel ?? 'bundled'}`);
 
   let resolved = false;
@@ -110,9 +118,15 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
         if (error) throw error;
         const credentialsToSave = { ...result, baseUrl };
         await writeCredentials(credentialsToSave);
+        logInfo('auth.capture_success', {
+          baseUrl,
+          userId: credentialsToSave.userId,
+          teamId: credentialsToSave.teamId ?? 'unknown',
+        });
         resolved = true;
         resolve(credentialsToSave);
       } catch (innerError) {
+        logError('auth.capture_failed', innerError, { baseUrl });
         resolved = true;
         reject(innerError);
       } finally {
@@ -125,6 +139,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
         } catch {
           // Ignore browser close failures during auth teardown.
         }
+        logInfo('auth.browser_closed', { baseUrl });
       }
     };
 
@@ -188,6 +203,7 @@ export async function runBrowserLoginCapture({ baseUrl, timeoutMs = 300000, verb
       await tryPageSession();
     } catch (error) {
       diag(`goto failed error=${error instanceof Error ? error.message : String(error)}`);
+      logError('auth.goto_failed', error, { loginUrl });
       await finish(null, error instanceof Error ? error : new Error(String(error)));
     }
   });

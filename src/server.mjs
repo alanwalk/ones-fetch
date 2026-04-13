@@ -4,10 +4,12 @@ import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join, dirname } from 'node:path';
 import { exec } from 'node:child_process';
+import { logInfo, logWarn, logError, getRuntimeLogPath } from './logger.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 const PORT = process.env.PORT ?? 36781;
+const SHOULD_OPEN_BROWSER = process.env.ONES_FETCH_OPEN_BROWSER !== '0';
 
 function openBrowser(url) {
   let command;
@@ -19,6 +21,7 @@ function openBrowser(url) {
   } else {
     command = `xdg-open "${url}"`;
   }
+  logInfo('browser.open', { url, platform: process.platform });
   exec(command);
 }
 
@@ -288,10 +291,12 @@ async function handleAuthLogin(req, res) {
 
   const context = await resolveRuntimeContext({ baseUrl: body.baseUrl, teamId: body.teamId });
   if (!context.baseUrl) {
+    logWarn('auth.login_missing_base_url');
     return sendJson(res, 400, { error: 'missing_base_url', detail: 'Need ONES base URL to open the login window.' });
   }
 
   if (authFlow.status === 'pending') {
+    logInfo('auth.login_already_pending', { baseUrl: authFlow.baseUrl });
     return sendJson(res, 200, { status: 'pending', baseUrl: authFlow.baseUrl });
   }
 
@@ -300,6 +305,7 @@ async function handleAuthLogin(req, res) {
   authFlow.startedAt = Date.now();
   authFlow.baseUrl = context.baseUrl;
   authFlow.teamId = context.teamId;
+  logInfo('auth.login_requested', { baseUrl: context.baseUrl, teamId: context.teamId ?? 'unknown' });
 
   void (async () => {
     try {
@@ -309,11 +315,13 @@ async function handleAuthLogin(req, res) {
       authFlow.error = null;
       authFlow.baseUrl = '';
       authFlow.teamId = '';
+      logInfo('auth.login_completed', { baseUrl: context.baseUrl });
     } catch (error) {
       authFlow.status = 'idle';
       authFlow.error = error?.message ?? String(error);
       authFlow.baseUrl = context.baseUrl;
       authFlow.teamId = context.teamId;
+      logError('auth.login_failed', error, { baseUrl: context.baseUrl, teamId: context.teamId ?? 'unknown' });
     }
   })();
 
@@ -326,6 +334,7 @@ async function handleCrawl(req, res) {
 
   const { taskIds, baseUrl: requestBaseUrl, teamId: requestTeamId } = body;
   if (!Array.isArray(taskIds) || taskIds.length === 0) {
+    logWarn('crawl.invalid_request');
     return sendJson(res, 400, { error: 'taskIds must be a non-empty array' });
   }
 
@@ -336,6 +345,7 @@ async function handleCrawl(req, res) {
     });
 
     if (!authToken || !userId || !baseUrl) {
+      logWarn('crawl.auth_required', { baseUrl, teamId: teamId ?? 'unknown' });
       return sendJson(res, 401, {
         error: 'auth_required',
         detail: 'Connect ONES first to let the local service capture credentials.',
@@ -345,9 +355,16 @@ async function handleCrawl(req, res) {
     }
 
     if (!teamId) {
+      logError('crawl.missing_team_id', null, { baseUrl });
       return sendJson(res, 500, { error: 'missing_config', detail: 'team-id not configured. Please login to auto-detect it.' });
     }
 
+    logInfo('crawl.start', {
+      baseUrl,
+      teamId,
+      taskCount: taskIds.length,
+      taskIds: taskIds.join(','),
+    });
     const seen = new Set();
     const roots = [];
     const allTasks = [];
@@ -365,10 +382,21 @@ async function handleCrawl(req, res) {
     }
 
     const enrichedTasks = await enrichTasks(baseUrl, teamId, allTasks, authToken, userId).catch(() => allTasks);
+    logInfo('crawl.success', {
+      baseUrl,
+      teamId,
+      rootCount: roots.length,
+      taskCount: enrichedTasks.length,
+    });
 
     return sendJson(res, 200, { roots, tasks: enrichedTasks, baseUrl, teamId });
   } catch (err) {
     const tokenExpired = err.message?.includes('401') || err.message?.includes('Token expired') || err.message?.includes('TOKEN_EXPIRED');
+    logError('crawl.failed', err, {
+      tokenExpired,
+      requestBaseUrl: requestBaseUrl ?? '',
+      requestTeamId: requestTeamId ?? '',
+    });
     return sendJson(res, tokenExpired ? 401 : 500, { error: tokenExpired ? 'token_expired' : 'crawl_failed', detail: err.message });
   }
 }
@@ -382,7 +410,7 @@ function startHeartbeatMonitor() {
   setInterval(() => {
     const now = Date.now();
     if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-      process.stdout.write('No heartbeat received for 30 seconds, shutting down server...\n');
+      logInfo('server.heartbeat_timeout', { timeoutMs: HEARTBEAT_TIMEOUT });
       process.exit(0);
     }
   }, HEARTBEAT_CHECK_INTERVAL);
@@ -419,18 +447,32 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   const url = `http://localhost:${PORT}`;
-  process.stdout.write(`ONES Fetch Web UI → ${url}\n`);
-  openBrowser(url);
+  logInfo('server.listen', { url, runtimeLog: getRuntimeLogPath() });
+  if (SHOULD_OPEN_BROWSER) {
+    openBrowser(url);
+  }
   startHeartbeatMonitor();
 });
 
 server.on('error', (err) => {
   if (err.code === 'EADDRINUSE') {
-    process.stdout.write(`Port ${PORT} is already in use. Opening browser to existing instance...\n`);
-    openBrowser(`http://localhost:${PORT}`);
+    logWarn('server.port_in_use', { port: PORT });
+    if (SHOULD_OPEN_BROWSER) {
+      openBrowser(`http://localhost:${PORT}`);
+    }
     process.exit(0);
   } else {
-    process.stderr.write(`Server error: ${err.message}\n`);
+    logError('server.error', err, { port: PORT });
     process.exit(1);
   }
+});
+
+process.on('uncaughtException', (error) => {
+  logError('process.uncaught_exception', error);
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+  logError('process.unhandled_rejection', reason);
+  process.exit(1);
 });

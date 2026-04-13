@@ -14,6 +14,50 @@ const projectRoot = join(__dirname, '..');
 // 固定安装目录（用户主目录下）
 const installDir = join(homedir(), '.ones-fetch');
 
+function buildWindowsLaunchCmd(nodePath) {
+  const escapedNodePath = nodePath.replace(/"/g, '""');
+  return `@echo off
+setlocal enableextensions
+set "ROOT=%~dp0.."
+set "LOGDIR=%ROOT%\\logs"
+set "LOGFILE=%LOGDIR%\\launcher.log"
+
+if not exist "%LOGDIR%" mkdir "%LOGDIR%"
+
+echo [%DATE% %TIME%] Launch requested.>> "%LOGFILE%"
+cd /d "%ROOT%" || (
+  echo [%DATE% %TIME%] Failed to switch directory to %ROOT%.>> "%LOGFILE%"
+  exit /b 1
+)
+
+set "NODE_EXE=${escapedNodePath}"
+if not exist "%NODE_EXE%" (
+  for %%I in (node.exe) do set "NODE_EXE=%%~$PATH:I"
+)
+
+if not defined NODE_EXE (
+  echo [%DATE% %TIME%] node.exe not found. Re-run install after confirming Node.js is available.>> "%LOGFILE%"
+  exit /b 1
+)
+
+echo [%DATE% %TIME%] Using node: %NODE_EXE%>> "%LOGFILE%"
+echo [%DATE% %TIME%] Starting server process...>> "%LOGFILE%"
+start "" /min cmd.exe /c ""%NODE_EXE%" src\\server.mjs >> "%LOGFILE%" 2>&1"
+set "EXIT_CODE=%ERRORLEVEL%"
+echo [%DATE% %TIME%] launch.cmd exited with code %EXIT_CODE%.>> "%LOGFILE%"
+exit /b %EXIT_CODE%
+`;
+}
+
+async function createWindowsLauncherFiles() {
+  const publicDir = join(installDir, 'public');
+  const launchCmdPath = join(publicDir, 'launch.cmd');
+
+  await mkdir(publicDir, { recursive: true });
+  await rm(join(publicDir, 'launcher.vbs'), { force: true }).catch(() => {});
+  await writeFile(launchCmdPath, buildWindowsLaunchCmd(process.execPath), 'utf8');
+}
+
 async function ensureInstallDir() {
   try {
     await access(installDir);
@@ -92,15 +136,17 @@ async function createWindowsShortcut() {
   const desktop = join(homedir(), 'Desktop');
   const shortcutPath = join(desktop, 'ONES 采集工具.lnk');
   const iconPath = join(installDir, 'public', 'icon.ico');
-  const vbsLauncher = join(installDir, 'public', 'launcher.vbs');
+  const cmdLauncher = join(installDir, 'public', 'launch.cmd');
+  const cmdExe = join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'cmd.exe');
 
   // 创建 PowerShell 脚本来生成快捷方式
   const psScript = `
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut("${shortcutPath.replace(/\\/g, '\\\\')}")
-$Shortcut.TargetPath = "wscript.exe"
-$Shortcut.Arguments = '"${vbsLauncher.replace(/\\/g, '\\\\')}"'
+$Shortcut.TargetPath = "${cmdExe.replace(/\\/g, '\\\\')}"
+$Shortcut.Arguments = '/c ""${cmdLauncher.replace(/\\/g, '\\\\')}""'
 $Shortcut.WorkingDirectory = "${installDir.replace(/\\/g, '\\\\')}"
+$Shortcut.WindowStyle = 7
 $Shortcut.IconLocation = "${iconPath.replace(/\\/g, '\\\\')},0"
 $Shortcut.Description = "ONES 任务采集工具"
 $Shortcut.Save()
@@ -175,6 +221,7 @@ export async function runInstallFlow() {
   try {
     const os = platform();
     if (os === 'win32') {
+      await createWindowsLauncherFiles();
       await createWindowsShortcut();
     } else if (os === 'darwin') {
       await createMacShortcut();

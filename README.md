@@ -51,6 +51,10 @@ npm install
 **Windows 用户：**
 - 双击桌面 `ONES 采集工具.lnk`
 - 浏览器会自动打开工具页面
+- Windows 启动入口已改为 `launch.cmd`，不再依赖 VBS
+- 如果双击没有反应，请重新执行一次 `npx ones-fetch@latest install` 以刷新启动器
+- 启动器日志在 `~/.ones-fetch/logs/launcher.log`
+- 服务运行日志在 `~/.ones-fetch/logs/runtime.log`
 
 ### 方式 2：命令行启动
 
