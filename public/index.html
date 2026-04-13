@@ -109,23 +109,6 @@ let allTasks = [];
 let collapsed = new Set();
 let authPollingTimer = null;
 let authContext = { baseUrl: '', teamId: '' };
-let heartbeatTimer = null;
-
-// Start heartbeat to keep server alive
-function startHeartbeat() {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-  heartbeatTimer = setInterval(() => {
-    fetch('/api/heartbeat').catch(() => {});
-  }, 10000); // Every 10 seconds
-}
-
-// Stop heartbeat when page unloads
-window.addEventListener('beforeunload', () => {
-  if (heartbeatTimer) clearInterval(heartbeatTimer);
-});
-
-// Start heartbeat on page load
-startHeartbeat();
 
 // Check auth status on page load
 async function checkInitialAuthStatus() {

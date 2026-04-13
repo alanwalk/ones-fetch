@@ -10,6 +10,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 const PORT = process.env.PORT ?? 36781;
 const SHOULD_OPEN_BROWSER = process.env.ONES_FETCH_OPEN_BROWSER !== '0';
+const SERVER_STARTED_AT = new Date().toISOString();
 
 function openBrowser(url) {
   let command;
@@ -401,21 +402,6 @@ async function handleCrawl(req, res) {
   }
 }
 
-// Heartbeat tracking
-let lastHeartbeat = Date.now();
-const HEARTBEAT_TIMEOUT = 30 * 1000; // 30 seconds
-const HEARTBEAT_CHECK_INTERVAL = 10 * 1000; // 10 seconds
-
-function startHeartbeatMonitor() {
-  setInterval(() => {
-    const now = Date.now();
-    if (now - lastHeartbeat > HEARTBEAT_TIMEOUT) {
-      logInfo('server.heartbeat_timeout', { timeoutMs: HEARTBEAT_TIMEOUT });
-      process.exit(0);
-    }
-  }, HEARTBEAT_CHECK_INTERVAL);
-}
-
 const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/') {
     try {
@@ -427,11 +413,14 @@ const server = http.createServer(async (req, res) => {
     }
     return;
   }
-  if (req.method === 'GET' && req.url === '/api/heartbeat') {
-    lastHeartbeat = Date.now();
-    res.writeHead(204);
-    res.end();
-    return;
+  if (req.method === 'GET' && req.url === '/api/health') {
+    return sendJson(res, 200, {
+      status: 'ok',
+      pid: process.pid,
+      port: Number(PORT),
+      url: `http://127.0.0.1:${PORT}`,
+      startedAt: SERVER_STARTED_AT,
+    });
   }
   if (req.method === 'GET' && req.url === '/api/auth/status') {
     return handleAuthStatus(req, res);
@@ -451,7 +440,6 @@ server.listen(PORT, () => {
   if (SHOULD_OPEN_BROWSER) {
     openBrowser(url);
   }
-  startHeartbeatMonitor();
 });
 
 server.on('error', (err) => {

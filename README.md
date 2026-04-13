@@ -23,7 +23,6 @@ npm install -g ones-fetch
 
 **注意**：
 - 依赖只需安装一次，后续启动无需重新安装
-- 服务器会在浏览器关闭 2 分钟后自动退出
 - 解析任务时会显示实时进度（1/7）
 
 ---
@@ -65,6 +64,20 @@ npm run dev
 ```
 
 启动后会自动打开浏览器访问 `http://localhost:36781`。
+
+### 方式 3：命令行管理后台服务
+
+```bash
+ones-fetch start
+ones-fetch status
+ones-fetch stop
+ones-fetch restart
+```
+
+- `start` 会在后台启动本地服务，并自动打开浏览器
+- `status` 会显示服务状态、PID 和访问地址
+- `stop` 会停止由 `ones-fetch start` 启动的后台实例
+- `restart` 会先停止再重新启动后台实例
 
 ### 使用流程
 

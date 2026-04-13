@@ -42,7 +42,7 @@ if not defined NODE_EXE (
 
 echo [%DATE% %TIME%] Using node: %NODE_EXE%>> "%LOGFILE%"
 echo [%DATE% %TIME%] Starting server process...>> "%LOGFILE%"
-start "" /min cmd.exe /c ""%NODE_EXE%" src\\server.mjs >> "%LOGFILE%" 2>&1"
+"%NODE_EXE%" bin\\cli.mjs start >> "%LOGFILE%" 2>&1
 set "EXIT_CODE=%ERRORLEVEL%"
 echo [%DATE% %TIME%] launch.cmd exited with code %EXIT_CODE%.>> "%LOGFILE%"
 exit /b %EXIT_CODE%
